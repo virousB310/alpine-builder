@@ -1,0 +1,84 @@
+name: Build Kali ARMHF Minimal
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Install tools
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          qemu-user-static \
+          binfmt-support \
+          debootstrap \
+          e2fsprogs \
+          xz-utils
+
+    - name: Enable ARM emulation
+      run: |
+        sudo update-binfmts --enable qemu-arm
+
+    - name: Create image
+      run: |
+        dd if=/dev/zero of=kali-armhf.img bs=1M count=1024
+        mkfs.ext4 -F kali-armhf.img
+
+        mkdir rootfs
+        sudo mount -o loop kali-armhf.img rootfs
+
+    - name: Bootstrap Kali ARMHF
+      run: |
+        sudo debootstrap \
+          --arch=armhf \
+          --foreign \
+          kali-rolling \
+          rootfs \
+          http://http.kali.org/kali
+
+    - name: Second stage
+      run: |
+        sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+        sudo mount --bind /dev rootfs/dev
+        sudo mount -t proc proc rootfs/proc
+        sudo mount -t sysfs sys rootfs/sys
+
+        sudo chroot rootfs /debootstrap/debootstrap --second-stage
+
+    - name: Configure system
+      run: |
+        sudo chroot rootfs /bin/bash <<'EOF'
+
+        apt update
+
+        apt install -y openssh-server
+
+        echo kali-arm > /etc/hostname
+
+        mkdir -p /run/sshd
+
+        passwd -d root
+
+        apt clean
+
+        EOF
+
+    - name: Finish
+      run: |
+        sudo umount -R rootfs
+        e2fsck -fy kali-armhf.img
+
+    - name: Compress
+      run: |
+        xz -9 -T0 kali-armhf.img
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: kali-armhf-minimal
+        path: kali-armhf.img.xz
