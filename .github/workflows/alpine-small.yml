@@ -1,0 +1,93 @@
+name: Build Small Alpine ARMv7 Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            qemu-user-static \
+            binfmt-support \
+            e2fsprogs \
+            wget \
+            xz-utils
+
+      - name: Enable ARM emulation
+        run: |
+          sudo update-binfmts --enable qemu-arm
+
+      - name: Download Alpine ARMv7 rootfs
+        run: |
+          wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-minirootfs-3.23.3-armv7.tar.gz
+
+      - name: Create 512MB ext4 image
+        run: |
+          dd if=/dev/zero of=alpine-small-armv7.img bs=1M count=512
+          mkfs.ext4 -F alpine-small-armv7.img
+
+      - name: Mount image
+        run: |
+          mkdir rootfs
+          sudo mount -o loop alpine-small-armv7.img rootfs
+
+      - name: Extract Alpine
+        run: |
+          sudo tar -xpf alpine-minirootfs-3.23.3-armv7.tar.gz -C rootfs
+
+      - name: Prepare ARM chroot
+        run: |
+          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+          sudo mount --bind /dev rootfs/dev
+          sudo mount -t proc proc rootfs/proc
+          sudo mount -t sysfs sys rootfs/sys
+
+          sudo cp /etc/resolv.conf rootfs/etc/resolv.conf
+
+      - name: Install minimal Alpine system
+        run: |
+          sudo chroot rootfs /bin/sh <<EOF
+          apk update
+
+          apk add \
+          alpine-base \
+          openrc \
+          openssh \
+          e2fsprogs \
+          util-linux
+
+          rc-update add devfs sysinit
+          rc-update add dmesg sysinit
+          rc-update add hwdrivers sysinit
+
+          rc-update add networking boot
+          rc-update add sshd default
+
+          echo alpine-arm > /etc/hostname
+
+          echo "ttyAMA0::respawn:/sbin/getty -L ttyAMA0 115200 vt100" >> /etc/inittab
+
+          passwd -d root
+          EOF
+
+      - name: Cleanup and check
+        run: |
+          sudo umount -R rootfs
+          e2fsck -fy alpine-small-armv7.img
+
+      - name: Compress image
+        run: |
+          xz -9 -T0 alpine-small-armv7.img
+
+      - name: Upload compressed image
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-small-armv7
+          path: alpine-small-armv7.img.xz
