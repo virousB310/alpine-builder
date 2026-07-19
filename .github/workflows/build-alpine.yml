@@ -1,0 +1,92 @@
+name: Build Full Alpine ARMv7 Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Install tools
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          qemu-user-static \
+          binfmt-support \
+          e2fsprogs \
+          wget \
+          xz-utils
+
+    - name: Download Alpine ARM rootfs
+      run: |
+        wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-minirootfs-3.23.3-armv7.tar.gz
+
+    - name: Create ext4 disk
+      run: |
+        dd if=/dev/zero of=alpine-full-root.img bs=1M count=2048
+        mkfs.ext4 -F alpine-full-root.img
+
+    - name: Mount image
+      run: |
+        mkdir rootfs
+        sudo mount -o loop alpine-full-root.img rootfs
+
+    - name: Extract Alpine
+      run: |
+        sudo tar -xpf alpine-minirootfs-3.23.3-armv7.tar.gz -C rootfs
+
+    - name: Prepare chroot
+      run: |
+        sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+        sudo mount --bind /dev rootfs/dev
+        sudo mount -t proc proc rootfs/proc
+        sudo mount -t sysfs sys rootfs/sys
+
+        sudo cp /etc/resolv.conf rootfs/etc/resolv.conf
+
+
+    - name: Install Alpine system
+      run: |
+        sudo chroot rootfs /bin/sh <<EOF
+
+        apk update
+
+        apk add \
+        alpine-base \
+        openrc \
+        busybox \
+        linux-firmware \
+        openssh \
+        e2fsprogs \
+        util-linux
+
+        rc-update add devfs sysinit
+        rc-update add dmesg sysinit
+        rc-update add hwdrivers sysinit
+
+        rc-update add networking boot
+        rc-update add sshd default
+
+        echo alpine-arm > /etc/hostname
+
+        echo "ttyAMA0::respawn:/sbin/getty -L ttyAMA0 115200 vt100" >> /etc/inittab
+
+        passwd -d root
+
+        EOF
+
+
+    - name: Cleanup
+      run: |
+        sudo umount -R rootfs
+        ls -lh alpine-full-root.img
+
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: alpine-full-armv7
+        path: alpine-full-root.img
