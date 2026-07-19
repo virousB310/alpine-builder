@@ -1,0 +1,82 @@
+name: Build VX Alpine ARMv7
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y qemu-user-static binfmt-support e2fsprogs wget xz-utils
+
+      - name: Enable qemu-arm
+        run: |
+          sudo update-binfmts --enable qemu-arm
+
+      - name: Download Alpine ARMv7
+        run: |
+          wget https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/armv7/alpine-minirootfs-3.22.5-armv7.tar.gz -O alpine.tar.gz
+
+      - name: Create image
+        run: |
+          dd if=/dev/zero of=vx-alpine.img bs=1M count=512
+          mkfs.ext4 -F vx-alpine.img
+
+          mkdir rootfs
+          sudo mount -o loop vx-alpine.img rootfs
+
+      - name: Extract rootfs
+        run: |
+          sudo tar -xpf alpine.tar.gz -C rootfs
+
+      - name: Prepare chroot
+        run: |
+          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+          sudo mount --bind /dev rootfs/dev
+          sudo mount -t proc proc rootfs/proc
+          sudo mount -t sysfs sys rootfs/sys
+
+          sudo cp /etc/resolv.conf rootfs/etc/resolv.conf
+
+      - name: Configure Alpine
+        run: |
+          sudo chroot rootfs /bin/sh <<'EOF'
+
+          apk update
+
+          apk add alpine-base openrc openssh
+
+          echo alpine-arm > /etc/hostname
+
+          rc-update add devfs sysinit
+          rc-update add dmesg sysinit
+          rc-update add hwdrivers sysinit
+          rc-update add networking boot
+          rc-update add sshd default
+
+          passwd -d root
+
+          apk cache clean
+
+          EOF
+
+      - name: Cleanup
+        run: |
+          sudo umount -R rootfs
+          e2fsck -fy vx-alpine.img
+
+      - name: Compress
+        run: |
+          xz -9 -T0 vx-alpine.img
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: VX-Alpine-ARMv7
+          path: vx-alpine.img.xz
