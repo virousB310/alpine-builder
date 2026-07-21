@@ -1,0 +1,73 @@
+name: Build VXLinux ARMHF
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            debootstrap \
+            qemu-user-static \
+            binfmt-support \
+            e2fsprogs \
+            xz-utils
+
+      - name: Create ARMHF rootfs
+        run: |
+          mkdir rootfs
+
+          sudo debootstrap \
+            --arch=armhf \
+            --foreign \
+            bookworm \
+            rootfs \
+            http://deb.debian.org/debian
+
+          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+          sudo chroot rootfs /debootstrap/debootstrap --second-stage
+
+      - name: Prepare filesystem
+        run: |
+          sudo mkdir -p rootfs/{dev,proc,sys,tmp,run}
+
+          sudo mkdir -p rootfs/sbin
+
+          echo '#!/bin/sh
+          echo "======== VXInit ========"
+          mount -t proc proc /proc
+          mount -t sysfs sysfs /sys
+          exec /bin/bash
+          ' | sudo tee rootfs/sbin/init
+
+          sudo chmod +x rootfs/sbin/init
+
+      - name: Create disk image
+        run: |
+          dd if=/dev/zero of=vxlinux-armhf.img bs=1M count=512
+
+          mkfs.ext4 vxlinux-armhf.img
+
+          mkdir mount
+
+          sudo mount -o loop vxlinux-armhf.img mount
+
+          sudo cp -a rootfs/* mount/
+
+          sudo umount mount
+
+      - name: Compress image
+        run: |
+          xz -9 vxlinux-armhf.img
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXLinux-armhf-image
+          path: vxlinux-armhf.img.xz
