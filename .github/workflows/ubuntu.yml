@@ -1,0 +1,109 @@
+name: Build Ubuntu ARMHF Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install tools
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          debootstrap \
+          qemu-user-static \
+          binfmt-support \
+          e2fsprogs \
+          parted \
+          gzip \
+          xz-utils
+
+    - name: Create image
+      run: |
+        dd if=/dev/zero of=ubuntu-armhf.img bs=1M count=2048
+        mkfs.ext4 -F ubuntu-armhf.img
+
+    - name: Mount image
+      run: |
+        mkdir rootfs
+        sudo mount ubuntu-armhf.img rootfs
+
+    - name: Bootstrap Ubuntu ARMHF
+      run: |
+        sudo debootstrap \
+          --arch=armhf \
+          --foreign \
+          noble \
+          rootfs \
+          http://ports.ubuntu.com/
+
+    - name: Prepare chroot
+      run: |
+        sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+
+        sudo mount --bind /dev rootfs/dev
+        sudo mount --bind /proc rootfs/proc
+        sudo mount --bind /sys rootfs/sys
+
+    - name: Configure system
+      run: |
+        sudo chroot rootfs /debootstrap/debootstrap --second-stage
+
+        sudo chroot rootfs bash -c "
+          apt update &&
+          apt install -y \
+          bash \
+          iproute2 \
+          net-tools \
+          openssh-client \
+          ca-certificates
+        "
+
+    - name: Install VXInit
+      run: |
+        sudo cp VXInit rootfs/sbin/init
+        sudo chmod 755 rootfs/sbin/init
+
+    - name: Network config
+      run: |
+        sudo mkdir -p rootfs/etc/network
+
+        cat <<EOF | sudo tee rootfs/etc/network/interfaces
+        auto lo
+        iface lo inet loopback
+
+        auto eth0
+        iface eth0 inet dhcp
+        EOF
+
+    - name: Hostname
+      run: |
+        echo "ubuntu-vx" | sudo tee rootfs/etc/hostname
+
+    - name: Cleanup
+      run: |
+        sudo rm -rf rootfs/var/cache/apt/*
+        sudo rm -rf rootfs/tmp/*
+        sudo rm -rf rootfs/var/log/*
+
+    - name: Unmount
+      run: |
+        sudo umount rootfs/sys || true
+        sudo umount rootfs/proc || true
+        sudo umount rootfs/dev || true
+        sudo umount rootfs
+
+    - name: Compress image
+      run: |
+        xz -9 ubuntu-armhf.img
+
+    - name: Upload image
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-armhf-vx
+        path: ubuntu-armhf.img.xz
