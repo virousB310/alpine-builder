@@ -18,6 +18,10 @@ jobs:
             e2fsprogs \
             xz-utils
 
+      - name: Enable ARM emulation
+        run: |
+          sudo update-binfmts --enable qemu-arm || true
+
       - name: Create ARMHF rootfs
         run: |
           mkdir rootfs
@@ -33,24 +37,57 @@ jobs:
 
           sudo chroot rootfs /debootstrap/debootstrap --second-stage
 
+      - name: Install base packages
+        run: |
+          sudo chroot rootfs apt update
+
+          sudo chroot rootfs apt install -y \
+            bash \
+            coreutils \
+            iproute2 \
+            net-tools \
+            iputils-ping \
+            curl \
+            wget \
+            ca-certificates \
+            nano \
+            vim \
+            python3
+
+      - name: Remove default init
+        run: |
+          sudo rm -rf rootfs/sbin/init
+
+      - name: Install VXInit
+        run: |
+          sudo mkdir -p rootfs/sbin
+
+          cat << 'EOF' | sudo tee rootfs/sbin/init
+#!/bin/sh
+
+echo "======== VXInit v0.1 ========"
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+echo "[VXINIT] Boot finished."
+
+exec /bin/bash
+EOF
+
+          sudo chmod +x rootfs/sbin/init
+
       - name: Prepare filesystem
         run: |
           sudo mkdir -p rootfs/{dev,proc,sys,tmp,run}
 
-          sudo mkdir -p rootfs/sbin
-
-          echo '#!/bin/sh
-          echo "======== VXInit ========"
-          mount -t proc proc /proc
-          mount -t sysfs sysfs /sys
-          exec /bin/bash
-          ' | sudo tee rootfs/sbin/init
-
-          sudo chmod +x rootfs/sbin/init
-
       - name: Create disk image
         run: |
-          dd if=/dev/zero of=vxlinux-armhf.img bs=1M count=512
+          dd if=/dev/zero \
+            of=vxlinux-armhf.img \
+            bs=1M \
+            count=512
 
           mkfs.ext4 vxlinux-armhf.img
 
@@ -66,8 +103,8 @@ jobs:
         run: |
           xz -9 vxlinux-armhf.img
 
-      - name: Upload image
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VXLinux-armhf-image
+          name: VXLinux-armhf
           path: vxlinux-armhf.img.xz
