@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Install tools
+      - name: Install build tools
         run: |
           sudo apt update
           sudo apt install -y \
@@ -37,13 +37,14 @@ jobs:
 
           sudo chroot rootfs /debootstrap/debootstrap --second-stage
 
-      - name: Install base packages
+      - name: Install basic packages
         run: |
           sudo chroot rootfs apt update
 
           sudo chroot rootfs apt install -y \
             bash \
             coreutils \
+            apt \
             iproute2 \
             net-tools \
             iputils-ping \
@@ -54,15 +55,13 @@ jobs:
             vim \
             python3
 
-      - name: Remove default init
+      - name: Create VXInit
         run: |
           sudo rm -rf rootfs/sbin/init
 
-      - name: Install VXInit
-        run: |
           sudo mkdir -p rootfs/sbin
 
-          cat << 'EOF' | sudo tee rootfs/sbin/init
+          sudo tee rootfs/sbin/init > /dev/null <<'EOF'
 #!/bin/sh
 
 echo "======== VXInit v0.1 ========"
@@ -78,11 +77,15 @@ EOF
 
           sudo chmod +x rootfs/sbin/init
 
-      - name: Prepare filesystem
+      - name: Prepare rootfs directories
         run: |
-          sudo mkdir -p rootfs/{dev,proc,sys,tmp,run}
+          sudo mkdir -p rootfs/dev
+          sudo mkdir -p rootfs/proc
+          sudo mkdir -p rootfs/sys
+          sudo mkdir -p rootfs/tmp
+          sudo mkdir -p rootfs/run
 
-      - name: Create disk image
+      - name: Create ext4 disk image
         run: |
           dd if=/dev/zero \
             of=vxlinux-armhf.img \
@@ -95,7 +98,7 @@ EOF
 
           sudo mount -o loop vxlinux-armhf.img mount
 
-          sudo cp -a rootfs/* mount/
+          sudo cp -a rootfs/. mount/
 
           sudo umount mount
 
@@ -103,8 +106,8 @@ EOF
         run: |
           xz -9 vxlinux-armhf.img
 
-      - name: Upload artifact
+      - name: Upload VXLinux image
         uses: actions/upload-artifact@v4
         with:
-          name: VXLinux-armhf
+          name: VXLinux-armhf-rootfs
           path: vxlinux-armhf.img.xz
