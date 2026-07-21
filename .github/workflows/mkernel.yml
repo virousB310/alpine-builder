@@ -1,0 +1,56 @@
+name: Build VXLinux Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            wget \
+            xz-utils \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            make \
+            gcc-arm-linux-gnueabihf
+
+      - name: Download Linux 6.12.1
+        run: |
+          wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.1.tar.xz
+
+      - name: Extract kernel
+        run: |
+          tar -xf linux-6.12.1.tar.xz
+
+      - name: Configure kernel
+        run: |
+          cd linux-6.12.1
+
+          make \
+            ARCH=arm \
+            CROSS_COMPILE=arm-linux-gnueabihf- \
+            virt_defconfig
+
+      - name: Build zImage
+        run: |
+          cd linux-6.12.1
+
+          make \
+            -j$(nproc) \
+            ARCH=arm \
+            CROSS_COMPILE=arm-linux-gnueabihf- \
+            zImage
+
+      - name: Upload zImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXLinux-zImage
+          path: linux-6.12.1/arch/arm/boot/zImage
